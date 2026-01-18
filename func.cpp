@@ -1,282 +1,253 @@
 #include "Header.h"
-#include <iostream>
 #include <random>
+#include <iostream>
 #include <chrono>
-#include <iomanip>
-#include <vector>
+#include <stdexcept>
 
-GF2_191::GF2_191() : value(0) {}
-GF2_191::GF2_191(const std::bitset<M>& v) : value(v) {}
-GF2_191::GF2_191(const std::string& s) : value(s) {}
-GF2_191::GF2_191(unsigned long long v) : value(v) {}
+GF2_191::GF2_191() : v(0) {}
+GF2_191::GF2_191(const std::bitset<M>& b) : v(b) {}
+GF2_191::GF2_191(unsigned long long x) : v(x) {}
 
-GF2_191 GF2_191::zero() {
-    return GF2_191();
+GF2_191::GF2_191(const std::string& s) {
+    if (s.size() > M) throw std::invalid_argument("String too long for GF2_191");
+    v.reset();
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '1') v[M - 1 - i] = 1; 
+        else if (s[i] != '0')  throw std::invalid_argument("Invalid character in string");
+    }
 }
 
-GF2_191 GF2_191::one() {
-    return GF2_191(1);
+GF2_191 GF2_191::from_string(const std::string& s) {
+    std::bitset<M> b;
+    b.reset();
+    for (size_t i = 0; i < s.size() && i < M; i++) {
+        if (s[s.size() - 1 - i] == '1')
+            b[i] = 1;
+    }
+    return GF2_191(b);
 }
 
-GF2_191 GF2_191::operator+(const GF2_191& other) const {
-    return GF2_191(value ^ other.value);
+std::string GF2_191::to_string() const {
+    std::string s;
+    for (int i = M - 1; i >= 0; i--) 
+        s += v[i] ? '1' : '0';
+    return s;
+}
+
+GF2_191 GF2_191::zero() { 
+    return GF2_191(); 
+}
+
+GF2_191 GF2_191::one() { 
+    return GF2_191(1); 
+}
+
+bool GF2_191::is_zero() const { 
+    return v.none(); 
+}
+
+bool GF2_191::is_one() const { 
+    return v[0] && v.count() == 1; 
+}
+
+GF2_191 GF2_191::operator+(const GF2_191& b) const {
+    return GF2_191(v ^ b.v);
 }
 
 GF2_191& GF2_191::operator+=(const GF2_191& other) {
-    value ^= other.value;
+    v ^= other.v;
     return *this;
 }
 
-GF2_191 GF2_191::operator*(const GF2_191& other) const {
-    std::bitset<2*M> product(0);
+bool GF2_191::operator==(const GF2_191& other) const {
+    return v == other.v;
+}
+
+bool GF2_191::operator!=(const GF2_191& other) const {
+    return v != other.v;
+}
+
+std::bitset<M> GF2_191::reduce(const std::bitset<2 * M>& p) {
+    std::bitset<2 * M> r = p;
+    for (int i = 2 * M - 2; i >= M; i--) {
+        if (r[i]) {
+            r[i] = 0;
+            r[i - M] = r[i - M] ^ 1;     
+            r[i - M + 9] = r[i - M + 9] ^ 1;
+        }
+    }
+
+    std::bitset<M> out;
+    for (int i = 0; i < M; i++) out[i] = r[i];
+    return out;
+}
+
+GF2_191 GF2_191::operator*(const GF2_191& b) const {
+    std::bitset<2 * M> p;
+    p.reset();
     for (int i = 0; i < M; i++) {
-        if (other.value[i]) {
+        if (b.v[i]) {
             for (int j = 0; j < M; j++) {
-                if (value[j]) {
-                    product[i + j] = product[i + j] ^ 1;
+                if (v[j]) {
+                    p[i + j] = p[i + j] ^ 1;
                 }
             }
         }
     }
     
-    for (int i = 2*M - 2; i >= M; i--) {
-        if (product[i]) {
-            product[i] = 0;
-            product[i - M] = product[i - M] ^ 1;     
-            product[i - M + 9] = product[i - M + 9] ^ 1;  
-        }
-    }
-    
-    std::bitset<M> result;
-    for (int i = 0; i < M; i++) {
-        result[i] = product[i];
-    }
-    
-    return GF2_191(result);
+    return GF2_191(reduce(p));
 }
 
 GF2_191 GF2_191::square() const {
-    std::bitset<2*M> squared(0);
-    
+    std::bitset<2 * M> p;
+    p.reset();
     for (int i = 0; i < M; i++) {
-        if (value[i]) {
-            squared[2*i] = 1;
-        }
-    }
-
-    for (int i = 2*M - 2; i >= M; i--) {
-        if (squared[i]) {
-            squared[i] = 0;
-            squared[i - M] = squared[i - M] ^ 1;
-            squared[i - M + 9] = squared[i - M + 9] ^ 1;
-        }
-    }
-    
-    std::bitset<M> result;
-    for (int i = 0; i < M; i++) {
-        result[i] = squared[i];
-    }
-    
-    return GF2_191(result);
+        if (v[i])  p[2 * i] = 1;
+    } 
+    return GF2_191(reduce(p));
 }
 
-GF2_191 GF2_191::power(const std::bitset<M>& exp) const {
-    if (is_zero()) return zero();
-    
-    GF2_191 result = one();
-    GF2_191 base = *this;
-    
-    for (int i = 0; i < M; i++) {
-        if (exp[i]) {
-            result = result * base;
+GF2_191 GF2_191::power(const std::string& exp_str) const {
+    if (is_zero()) {
+        bool all_zero = true;
+        for (char c : exp_str) {
+            if (c != '0') {
+                all_zero = false;
+                break;
+            }
         }
-        base = base.square();
+        if (all_zero) throw std::runtime_error("0^0 is undefined");
+        return zero();
+    }
+
+    GF2_191 r = one();
+    GF2_191 b = *this;
+
+    for (int i = exp_str.length() - 1; i >= 0; i--) {
+        if (exp_str[i] == '1') r = r * b;
+        if (i > 0) b = b.square();
     }
     
-    return result;
+    return r;
 }
 
 GF2_191 GF2_191::inverse() const {
-    if (is_zero()) {
-        throw std::runtime_error("Cannot invert zero element");
-    }
-    
-    GF2_191 result = *this;
-    
+    if (is_zero()) throw std::runtime_error("Inverse of zero");
+    GF2_191 r = *this;
     for (int i = 1; i < M; i++) {
-        result = result.square();
-        if (i < M - 1) {
-            result = result * (*this);
-        }
+        r = r.square();
+        if (i < M - 1) r = r * (*this);
+    } 
+    return r;
+}
+
+bool GF2_191::trace() const {
+    GF2_191 t = *this;
+    GF2_191 acc = *this;
+    for (int i = 1; i < M; i++) {
+        t = t.square();
+        acc = acc + t;
     }
-    
-    return result;
+    return acc.v[0];
 }
 
-std::string GF2_191::to_string() const {
-    std::string s;
-    for (int i = M - 1; i >= 0; i--) {
-        s += (value[i] ? '1' : '0');
-    }
-    return s;
-}
-
-GF2_191 GF2_191::from_string(const std::string& s) {
-    if (s.length() > M) {
-        throw std::invalid_argument("String too long for field element");
-    }
-    
-    std::string padded = s;
-    while (padded.length() < M) {
-        padded = "0" + padded;
-    }
-    
-    std::bitset<M> bits;
-    for (int i = 0; i < M; i++) {
-        bits[i] = (padded[M - 1 - i] == '1');
-    }
-    
-    return GF2_191(bits);
-}
-
-bool GF2_191::is_zero() const {
-    return value.none();
-}
-
-bool GF2_191::is_one() const {
-    return value.count() == 1 && value[0] == 1;
-}
-
-bool GF2_191::operator==(const GF2_191& other) const {
-    return value == other.value;
-}
-
-bool GF2_191::operator!=(const GF2_191& other) const {
-    return value != other.value;
+GF2_191 GF2_191::random() {
+    static std::mt19937_64 gen(std::random_device{}());
+    std::bitset<M> b;
+    for (int i = 0; i < M; i++) b[i] = gen() & 1;
+    return GF2_191(b);
 }
 
 void GF2_191::print() const {
     std::cout << to_string() << std::endl;
 }
 
-GF2_191 GF2_191::random() {
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<unsigned long long> dis;
-    
-    std::bitset<M> bits;
-    for (int i = 0; i < M; i++) {
-        bits[i] = dis(gen) & 1;
-    }
-    
-    return GF2_191(bits);
-}
-
-void test() {
-    std::cout << "\n=== TESTS===\n";
-
-    GF2_191 a = GF2_191::random();
-    GF2_191 b = GF2_191::random();
-    GF2_191 c = GF2_191::random();
-    GF2_191 d = GF2_191::random();
-    while (d.is_zero()) d = GF2_191::random();
-    
-    std::cout << "Test elements generated\n";
-    std::cout << "a = " << a.to_string().substr(0, 13) << "...\n";
-    std::cout << "b =  " << b.to_string().substr(0, 13) << "...\n";
-    std::cout << "c = " << c.to_string().substr(0, 13) << "...\n";
-    std::cout << "d = " << d.to_string().substr(0, 13) << "...\n";
-    
-    GF2_191 zero = GF2_191::zero();
-    GF2_191 zero_res = a + zero;
-    std::cout << "a + 0 = " << zero_res.to_string().substr(0, 13) << std::endl;
-    
-    GF2_191 one = GF2_191::one();
-    GF2_191 one_res = a * one;
-    std::cout << "a * 1 = " << one_res.to_string().substr(0, 13) << std::endl;
-
-    GF2_191 aadd = a + b;
-    GF2_191 badd = b + a;
-    std::cout << "a + b = " << aadd.to_string().substr(0, 13) << std::endl;
-    std::cout << "b + a = " << badd.to_string().substr(0, 13) << std::endl;
-
-    GF2_191 addc = (a + b) + c;
-    GF2_191 aaddc = a + (b + c);
-    std::cout << "(a + b) + c = " << addc.to_string().substr(0, 13) << std::endl;
-    std::cout << "a + (b + c) = " << aaddc.to_string().substr(0, 13) << std::endl;
-
-    GF2_191 mulc = (a + b) * c;
-    GF2_191 cmulc = (a * c) + (b * c);
-    std::cout << "(a + b) * c = " << mulc.to_string().substr(0, 13) << std::endl;
-    std::cout << "a*c + b*c = " << cmulc.to_string().substr(0, 13) << std::endl;
-    
-    GF2_191 d_inv = d.inverse();
-    GF2_191 inv = d * d_inv;
-    std::cout << "d*d^(-1) = " << inv.to_string().substr(0, 13) << std::endl;
-    
-    std::bitset<M> exp_max;
-    exp_max.set(); 
-    GF2_191 d_power = d.power(exp_max);
-    GF2_191 pow = d.power(exp_max);
-    std::cout << "d^(2^m-1) = " << pow.to_string().substr(0, 13) << std::endl;
-    
-    GF2_191 aa_mult = a * a;
-    GF2_191 a_squared = a.square();
-    std::cout << "a * a = " << aa_mult.to_string().substr(0, 13) << std::endl;
-    std::cout << "a^2 = " << a_squared.to_string().substr(0, 13) << std::endl;
-    
-    std::string a_str = a.to_string();
-    GF2_191 str = GF2_191::from_string(a_str);
-    std::cout << "Original: " << a.to_string().substr(0, 13) << std::endl;
-    std::cout << "After convert : " << str.to_string().substr(0, 13) << std::endl;
-
-}
-
 void timer() {
     std::cout << "\n=== TIME ===\n";
     
-    const int ITERATIONS = 1000;
+    const int N = 1000;
+    GF2_191 a = GF2_191::random();
+    GF2_191 b = GF2_191::random();
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < N; i++) { GF2_191 temp = a + b; }
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "Add: " << std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / N << " ns\n";
+
+    t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < N; i++) { GF2_191 temp = a * b; }
+    t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "Mul: " << std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / N << " ns\n";
+
+    t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < N; i++) { GF2_191 temp = a.square(); }
+    t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "Sq: " << std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / N << " ns\n";
+
+    t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 100; i++) { GF2_191 temp = a.inverse(); }
+    t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "Inv: " << std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count() / 100 << " ns\n";
     
-    std::vector<GF2_191> elements;
+    std::cout << std::endl;
+}
+
+inline uint64_t rdtsc() {
+    unsigned int lo, hi;
+    #ifdef _MSC_VER
+        __asm {
+            rdtsc
+            mov lo, eax
+            mov hi, edx
+        }
+    #else
+        __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    #endif
+    return ((uint64_t)hi << 32) | lo;
+}
+
+void ticks() {
+    const int N = 1000;
+    GF2_191 a = GF2_191::random();
+    GF2_191 b = GF2_191::random();
     for (int i = 0; i < 100; i++) {
-        elements.push_back(GF2_191::random());
+        GF2_191 temp = a + b;
+        temp = a * b;
     }
+
+    uint64_t t1 = rdtsc();
+    for (int i = 0; i < N; i++) {
+        GF2_191 temp = a + b;
+    }
+    uint64_t t2 = rdtsc();
+    uint64_t add_cycles = (t2 - t1) / N;
     
-    auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < ITERATIONS; i++) {
-        GF2_191 result = elements[i % 100] + elements[(i + 1) % 100];
+    t1 = rdtsc();
+    for (int i = 0; i < N; i++) {
+        GF2_191 temp = a * b;
     }
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration_add = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / ITERATIONS;
+    t2 = rdtsc();
+    uint64_t mul_cycles = (t2 - t1) / N;
 
-    start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < ITERATIONS; i++) {
-        GF2_191 result = elements[i % 100] * elements[(i + 1) % 100];
+    t1 = rdtsc();
+    for (int i = 0; i < N; i++) {
+        GF2_191 temp = a.square();
     }
-    end = std::chrono::high_resolution_clock::now();
-    auto duration_mul = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / ITERATIONS;
+    t2 = rdtsc();
+    uint64_t sqr_cycles = (t2 - t1) / N;
     
-
-    start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < ITERATIONS; i++) {
-        GF2_191 result = elements[i % 100].square();
-    }
-    end = std::chrono::high_resolution_clock::now();
-    auto duration_sqr = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / ITERATIONS;
-
-    start = std::chrono::high_resolution_clock::now();
+    t1 = rdtsc();
     for (int i = 0; i < 100; i++) {
-        GF2_191 result = elements[i].inverse();
+        GF2_191 temp = a.inverse();
     }
-    end = std::chrono::high_resolution_clock::now();
-    auto duration_inv = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 100;
+    t2 = rdtsc();
+    uint64_t inv_cycles = (t2 - t1) / 100;
     
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "Operation          | Avg Time (ns) | Ticks\n";
-    std::cout << "-------------------+---------------+--------------- \n" ;
-    std::cout << "Addition           | " << std::setw(13) << duration_add << " | " << std::setw(13) << duration_add/1000.0 << std::endl;
-    std::cout << "Multiplication     | " << std::setw(13) << duration_mul << " | " << std::setw(13) << duration_mul/1000.0 << std::endl;
-    std::cout << "Squaring           | " << std::setw(13) << duration_sqr << " | " << std::setw(13) << duration_sqr/1000.0 << std::endl;
-    std::cout << "Inverse            | " << std::setw(13) << duration_inv << " | " << std::setw(13) << duration_inv/1000.0 << std::endl;
+    std::cout << "\n=== PROCESSOR TICKS ===\n";
+    std::cout << "Add: " << add_cycles << "\n";
+    std::cout << "Mul: " << mul_cycles << "\n";
+    std::cout << "Sq: " << sqr_cycles << "\n";
+    std::cout << "Inv: " << inv_cycles << "\n";
+
     std::cout << std::endl;
 }
